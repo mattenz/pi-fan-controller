@@ -1,51 +1,61 @@
 #!/usr/bin/env python3
 
+import subprocess
 import time
 
-from gpiozero import OutputDevice
+from gpiozero import OutputDevice, PWMOutputDevice
 
 
-ON_THRESHOLD = 65  # (degrees Celsius) Fan kicks on at this temperature.
-OFF_THRESHOLD = 55  # (degress Celsius) Fan shuts off at this temperature.
-SLEEP_INTERVAL = 5  # (seconds) How often we check the core temperature.
-GPIO_PIN = 17  # Which GPIO pin you're using to control the fan.
+FULL_THRESHOLD = 70  # (degrees Celsius) Fan kicks on at this temperature.
+IDLE_THRESHOLD = 50  # (degress Celsius) Fan shuts off at this temperature.
+SLEEP_INTERVAL = 1  # (seconds) How often we check the core temperature.
+GPIO_PIN = 18  # Which GPIO pin you're using to control the fan.
+FAN_IDLE = 0.3 # Minimum fan speed. Do not set below 0.3.
+FAN_FULL = 1.0 # Maximum fan speed. Do not set abole 1.0.
 
 
 def get_temp():
     """Get the core temperature.
-
-    Read file from /sys to get CPU temp in temp in C *1000
-
+    Run a shell script to get the core temp and parse the output.
+    Raises:
+        RuntimeError: if response cannot be parsed.
     Returns:
-        int: The core temperature in thousanths of degrees Celsius.
+        float: The core temperature in degrees Celsius.
     """
-    with open('/sys/class/thermal/thermal_zone0/temp') as f:
-        temp_str = f.read()
-
+    output = subprocess.run(['vcgencmd', 'measure_temp'], capture_output=True)
+    temp_str = output.stdout.decode()
     try:
-        return int(temp_str) / 1000
-    except (IndexError, ValueError,) as e:
-        raise RuntimeError('Could not parse temperature output.') from e
+        return float(temp_str.split('=')[1].split('\'')[0])
+    except (IndexError, ValueError):
+        raise RuntimeError('Could not parse temperature output.')
+
 
 if __name__ == '__main__':
     # Validate the on and off thresholds
-    if OFF_THRESHOLD >= ON_THRESHOLD:
-        raise RuntimeError('OFF_THRESHOLD must be less than ON_THRESHOLD')
+    if IDLE_THRESHOLD >= FULL_THRESHOLD:
+        raise RuntimeError('IDLE_THRESHOLD must be less than FULL_THRESHOLD')
 
-    fan = OutputDevice(GPIO_PIN)
+    if FAN_IDLE >= FAN_FULL:
+        raise RuntimeError('FAN_IDLE must be less than FAN_FULL')
+
+    fan = PWMOutputDevice(GPIO_PIN)
 
     while True:
         temp = get_temp()
 
-        # Start the fan if the temperature has reached the limit and the fan
-        # isn't already running.
-        # NOTE: `fan.value` returns 1 for "on" and 0 for "off"
-        if temp > ON_THRESHOLD and not fan.value:
-            fan.on()
+        if temp >= FULL_THRESHOLD:
+            fan.value = FAN_FULL
+            print(f'Set fan to {fan.value:.3f} (Full). Temp is {temp:.2f}')
 
-        # Stop the fan if the fan is running and the temperature has dropped
-        # to 10 degrees below the limit.
-        elif fan.value and temp < OFF_THRESHOLD:
-            fan.off()
+        elif temp > IDLE_THRESHOLD and temp < FULL_THRESHOLD:
+            speed = FAN_IDLE + ((temp - IDLE_THRESHOLD) * ((FAN_FULL - FAN_IDLE) / (FULL_THRESHOLD - IDLE_THRESHOLD)))
+            if speed != fan.value:
+                fan.value = speed
+                print(f'Set fan to {fan.value:.3f}. Temp is {temp:.2f}')
+
+        elif temp < IDLE_THRESHOLD and fan.value != FAN_IDLE:
+            fan.value = FAN_IDLE
+            print(f'Set fan to {fan.value:.3f} (Idle). Temp is {temp:.2f}')
+
 
         time.sleep(SLEEP_INTERVAL)
