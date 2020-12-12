@@ -3,7 +3,7 @@
 import subprocess
 import time
 
-from gpiozero import OutputDevice, PWMOutputDevice
+from gpiozero import PWMOutputDevice
 
 
 FULL_THRESHOLD = 70  # (degrees Celsius) Fan kicks on at this temperature.
@@ -31,10 +31,11 @@ def get_temp():
 
 
 if __name__ == '__main__':
-    # Validate the on and off thresholds
+    # Validate the on and idle thresholds
     if IDLE_THRESHOLD >= FULL_THRESHOLD:
         raise RuntimeError('IDLE_THRESHOLD must be less than FULL_THRESHOLD')
-
+    
+    # Validate idle speed is not greater than or equal to full speed
     if FAN_IDLE >= FAN_FULL:
         raise RuntimeError('FAN_IDLE must be less than FAN_FULL')
 
